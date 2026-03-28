@@ -216,6 +216,8 @@ export class Components implements OnInit, OnStart {
 					}
 				};
 
+				const ancestryConnections = new Map<Instance, RBXScriptConnection>();
+
 				const instanceAdded = (instance: Instance) => {
 					if (predicate !== undefined && !predicate(instance)) {
 						return;
@@ -231,8 +233,31 @@ export class Components implements OnInit, OnStart {
 					tracker.setHasTag(instance, true);
 				};
 
-				CollectionService.GetInstanceAddedSignal(config.tag).Connect(instanceAdded);
+				const instanceTagged = (instance: Instance) => {
+					instanceAdded(instance);
+
+					if (!ancestryConnections.has(instance)) {
+						ancestryConnections.set(
+							instance,
+							instance.AncestryChanged.Connect(() => {
+								if (tracker.isTracked(instance)) {
+									tracker.untrackInstance(instance, listener);
+									tracker.setHasTag(instance, false);
+									this.removeComponent(instance, ctor);
+								}
+								instanceAdded(instance);
+							}),
+						);
+					}
+				};
+
+				CollectionService.GetInstanceAddedSignal(config.tag).Connect(instanceTagged);
 				CollectionService.GetInstanceRemovedSignal(config.tag).Connect((instance) => {
+					const conn = ancestryConnections.get(instance);
+					if (conn) {
+						conn.Disconnect();
+						ancestryConnections.delete(instance);
+					}
 					tracker.untrackInstance(instance, listener);
 					tracker.setHasTag(instance, false);
 					this.removeComponent(instance, ctor);
@@ -241,7 +266,7 @@ export class Components implements OnInit, OnStart {
 				for (const instance of CollectionService.GetTagged(config.tag)) {
 					safeCall(
 						[`[Flamework] Failed to instantiate '${ctor}' for`, instance, `[${instance.GetFullName()}]`],
-						() => instanceAdded(instance),
+						() => instanceTagged(instance),
 						false,
 					);
 				}
